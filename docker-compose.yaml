@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    platform: linux/arm64/v8
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
+    networks: 
+      - rmoff_kafka
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    platform: linux/arm64/v8
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9991
+    networks: 
+      - rmoff_kafka
+    ports:
+      - 19092:19092
+      - 9092:9092
+    
+  postgres:
+    image: debezium/postgres:15-alpine
+    platform: linux/arm64/v8
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    ports:
+    - 5432:5432
+    networks: 
+      - rmoff_kafka
+  debezium:
+    # image: quay.io/osclimate/debezium-connect-ev:latest
+    image: debezium/connect:2.7.2.Final
+    # image: debezium/connect
+    platform: linux/arm64/v8
+    depends_on:
+    - kafka
+    - postgres
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: debezium_connect_configs
+      OFFSET_STORAGE_TOPIC: debezium_connect_offsets
+      STATUS_STORAGE_TOPIC: debezium_connect_statuses
+      KEY_CONVERTER_SCHEMAS_ENABLE: false
+      VALUE_CONVERTER_SCHEMAS_ENABLE: false
+      # KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      # VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8085
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8085
+
+      PLUGIN_PATH: /kafka/connect/debezium-connector-postgres
+    ports:
+    - 8083:8083
+    networks: 
+      - rmoff_kafka
+    volumes:
+    - ./plugins:/kafka/connect/debezium-connector-postgres
+    
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.6-1-ubi8
+    environment:
+      - SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL=zookeeper:2181
+      - SCHEMA_REGISTRY_HOST_NAME=schema-registry
+      - SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS=kafka:9092
+      - SCHEMA_REGISTRY_LISTENERS=http://schema-registry:8085,http://localhost:8085
+    ports:
+      - 8085:8085
+    depends_on: [zookeeper, kafka]
+    networks: 
+      - rmoff_kafka
+
+volumes:
+  postgres_data:
+networks: 
+  rmoff_kafka:
+    name: rmoff_kafka
